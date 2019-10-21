@@ -48,6 +48,12 @@ class DDPG(object):
         self.gamma = params['gamma']
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        self.replay_strategy = params['replay_strategy']
+        if self.replay_strategy == 'future':
+            self.use_goal = True
+        else:
+            self.use_goal = False
+
         self.dimo = self.input_dims['o']
         self.dimg = self.input_dims['g']
         self.dimu = self.input_dims['u']
@@ -103,10 +109,11 @@ class DDPG(object):
         transitions = self.sample_transitions(episode_batch, num_normalizing_transitions)
 
         self.o_stats.update(transitions['o'])
-        self.g_stats.update(transitions['g'])
-
         self.o_stats.recompute_stats()
-        self.g_stats.recompute_stats()
+
+        if self.use_goal:
+            self.g_stats.update(transitions['g'])
+            self.g_stats.recompute_stats()
 
     def sample_batch(self):
         transitions = self.buffer.sample(self.batch_size)
@@ -145,40 +152,23 @@ class DDPG(object):
         pi_loss.backward()
         self.actor_optimizer.step()
 
-    # TODO: use load_state_dict here
     def update_target_net(self):
         beta = 1. - self.polyak
-
-        # actor
-        self.target.actor.linear1.weight = torch.nn.Parameter(beta * self.main.actor.linear1.weight + self.polyak * self.target.actor.linear1.weight)
-        self.target.actor.linear1.bias = torch.nn.Parameter(beta * self.main.actor.linear1.bias + self.polyak * self.target.actor.linear1.bias)
-        self.target.actor.linear2.weight = torch.nn.Parameter(beta * self.main.actor.linear2.weight + self.polyak * self.target.actor.linear2.weight)
-        self.target.actor.linear2.bias = torch.nn.Parameter(beta * self.main.actor.linear2.bias + self.polyak * self.target.actor.linear2.bias)
-        self.target.actor.linear3.weight = torch.nn.Parameter(beta * self.main.actor.linear3.weight + self.polyak * self.target.actor.linear3.weight)
-        self.target.actor.linear3.bias = torch.nn.Parameter(beta * self.main.actor.linear3.bias + self.polyak * self.target.actor.linear3.bias)
-        self.target.actor.linear4.weight = torch.nn.Parameter(beta * self.main.actor.linear4.weight + self.polyak * self.target.actor.linear4.weight)
-        self.target.actor.linear4.bias = torch.nn.Parameter(beta * self.main.actor.linear4.bias + self.polyak * self.target.actor.linear4.bias)
-
-        # critic
-        self.target.critic.linear1.weight = torch.nn.Parameter(beta * self.main.critic.linear1.weight + self.polyak * self.target.critic.linear1.weight)
-        self.target.critic.linear1.bias = torch.nn.Parameter(beta * self.main.critic.linear1.bias + self.polyak * self.target.critic.linear1.bias)
-        self.target.critic.linear2.weight = torch.nn.Parameter(beta * self.main.critic.linear2.weight + self.polyak * self.target.critic.linear2.weight)
-        self.target.critic.linear2.bias = torch.nn.Parameter(beta * self.main.critic.linear2.bias + self.polyak * self.target.critic.linear2.bias)
-        self.target.critic.linear3.weight = torch.nn.Parameter(beta * self.main.critic.linear3.weight + self.polyak * self.target.critic.linear3.weight)
-        self.target.critic.linear3.bias = torch.nn.Parameter(beta * self.main.critic.linear3.bias + self.polyak * self.target.critic.linear3.bias)
-        self.target.critic.linear4.weight = torch.nn.Parameter(beta * self.main.critic.linear4.weight + self.polyak * self.target.critic.linear4.weight)
-        self.target.critic.linear4.bias = torch.nn.Parameter(beta * self.main.critic.linear4.bias + self.polyak * self.target.critic.linear4.bias)
+        for target, source in zip(self.target.parameters(), self.main.parameters()):
+            target.data.copy_(beta * source.data + self.polyak * target.data)
 
     def create_network(self):
         # for actor network
         self.o_stats = Normalizer(size=self.dimo, eps=self.norm_eps, default_clip_range=self.norm_clip)
-        self.g_stats = Normalizer(size=self.dimg, eps=self.norm_eps, default_clip_range=self.norm_clip)
+        if self.use_goal:
+            self.g_stats = Normalizer(size=self.dimg, eps=self.norm_eps, default_clip_range=self.norm_clip)
+        else:
+            self.g_stats = None
 
-        self.main = ActorCritic(self.o_stats, self.g_stats, self.input_dims).to(self.device)
-        self.target = ActorCritic(self.o_stats, self.g_stats, self.input_dims).to(self.device)
+        self.main = ActorCritic(self.o_stats, self.g_stats, self.input_dims, self.use_goal).to(self.device)
+        self.target = ActorCritic(self.o_stats, self.g_stats, self.input_dims, self.use_goal).to(self.device)
         self.target.actor = copy.deepcopy(self.main.actor)
         self.target.critic = copy.deepcopy(self.main.critic)
 
-        # use MPI_ADAM instead
         self.actor_optimizer = optim.Adam(self.main.actor.parameters(), lr=self.pi_lr)
         self.critic_optimizer = optim.Adam(self.main.critic.parameters(), lr=self.Q_lr)

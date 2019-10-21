@@ -72,6 +72,8 @@ def parse_args():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('--env', help='OpenAI gym Fetch env id', type=str,
                             choices=['FetchReach-v1', 'FetchPush-v1', 'FetchPickAndPlace-v1'])
+    arg_parser.add_argument('--replay_strategy', help='Sampling strategy for replay', type=str,
+                            choices=['none', 'future'])  # none is the original DDPG, future is hindsight replay
     arg_parser.add_argument('--num_timesteps', help='Total number of time steps for training',
                             type=float, default=1e6),
     arg_parser.add_argument('--num_workers', help='Number of workers to run the rollouts',
@@ -80,6 +82,7 @@ def parse_args():
     args = arg_parser.parse_args()
     PARAMS['num_workers'] = args.num_workers
     PARAMS['num_timesteps'] = args.num_timesteps
+    PARAMS['replay_strategy'] = args.replay_strategy
     return args
 
 
@@ -132,7 +135,8 @@ def main():
     env.get_images()
     seed = set_seed(args.seed)
     get_dims(env)
-    PARAMS['sample_her_transitions'] = make_sample_her_transitions(PARAMS['distance_threshold'])
+    PARAMS['sample_her_transitions'] = make_sample_her_transitions(PARAMS['distance_threshold'],
+                                                                   PARAMS['replay_strategy'])
     PARAMS['log_dir'] = 'runs/env=%s_seed=%s' % (args.env, seed)
     shutil.rmtree(PARAMS['log_dir'], ignore_errors=True)
     print('logging to:', PARAMS['log_dir'])

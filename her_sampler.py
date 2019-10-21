@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def make_sample_her_transitions(distance_threshold):
+def make_sample_her_transitions(distance_threshold, replay_strategy='future'):
     """Creates a sample function that can be used for HER experience replay.
 
     Args:
@@ -12,7 +12,10 @@ def make_sample_her_transitions(distance_threshold):
         reward_fun (function): function to re-compute the reward with substituted goals
     """
     replay_k = 4
-    future_p = 1 - (1. / (1 + replay_k))  # --> 0.8
+    if replay_strategy == 'future':
+        future_p = 1 - (1. / (1 + replay_k))  # --> 0.8
+    else:
+        future_p = 0
 
     def _sample_her_transitions(episode_batch, batch_size):
         """episode_batch is {key: array(buffer_size x T x dim_key)}
